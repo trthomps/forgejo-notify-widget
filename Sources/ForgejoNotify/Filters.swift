@@ -47,7 +47,9 @@ struct FilterSettings: Equatable {
             }
         }
         if onlyInvolved, let me = me?.lowercased() {
-            guard let e = enrichment, isIssueLike else { return "Not involved" }
+            guard isIssueLike else { return "Not involved" }
+            // Lookup failed: we don't know, so show it rather than hide (and maybe auto-read) it.
+            guard let e = enrichment else { return nil }
             let involved = e.author?.lowercased() == me
                 || e.assignees.contains { $0.lowercased() == me }
                 || e.requestedReviewers.contains { $0.lowercased() == me }

@@ -7,7 +7,7 @@ enum CLI {
         let store = NotificationStore()
         var finished = false
         Task {
-            await store.refresh(userInitiated: true)
+            await store.refresh(userInitiated: true, readOnly: true)
             finished = true
         }
         while !finished { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }

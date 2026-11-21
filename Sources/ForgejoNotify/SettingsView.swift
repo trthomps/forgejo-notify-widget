@@ -178,6 +178,7 @@ private struct AccountSettings: View {
     @State private var message: String?
     @State private var hasOAuth = false
     @State private var hasToken = false
+    @State private var serverEdit: Task<Void, Never>?
 
     var body: some View {
         Form {
@@ -211,6 +212,18 @@ private struct AccountSettings: View {
         }
         .formStyle(.grouped)
         .onAppear(perform: reloadState)
+        .onChange(of: serverURL) { _, _ in
+            // Typing in the Server field: wait for a pause, then switch accounts.
+            serverEdit?.cancel()
+            serverEdit = Task {
+                try? await Task.sleep(for: .milliseconds(800))
+                guard !Task.isCancelled else { return }
+                reloadState()
+                if authMode != .tea, store.serverURL != CredentialProvider.normalizedServer(serverURL) {
+                    store.accountChanged()
+                }
+            }
+        }
     }
 
     private var teaSection: some View {

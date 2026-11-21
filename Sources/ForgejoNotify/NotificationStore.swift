@@ -35,8 +35,12 @@ final class NotificationStore: ObservableObject {
     private var filters = Prefs.filters
     private var announced: Set<Int> = []
     private var hasLoadedOnce = false
-    /// Thread id → when we marked it read. Hides it until the server agrees, unless it has newer activity.
+    /// Thread id → the thread's server `updatedAt` when we marked it read. Hides it until the
+    /// server agrees, unless it gets newer activity.
     private var pendingReads: [Int: Date] = [:]
+    /// Bumped when the account changes so in-flight results for the old one are dropped.
+    private var generation = 0
+    private var refreshQueued = false
 
     private struct CachedEnrichment: Codable {
         var updatedAt: Date
@@ -107,15 +111,21 @@ final class NotificationStore: ObservableObject {
 
     /// Account settings changed: drop the cached credential and start over.
     func accountChanged() {
+        generation += 1
+        threads = []
+        shown = []
+        hidden = []
+        user = nil
+        userFor = nil
+        announced = []
+        hasLoadedOnce = false
+        pendingReads = [:]
+        enrichments = [:]   // keyed by thread id, which means nothing on another server
+        lastFetched = nil
+        error = nil
+        saveCache()
         Task {
             await credentials.reset()
-            threads = []
-            shown = []
-            hidden = []
-            user = nil
-            userFor = nil
-            announced = []
-            hasLoadedOnce = false
             await refresh(userInitiated: true)
         }
     }
@@ -141,15 +151,25 @@ final class NotificationStore: ObservableObject {
 
     // MARK: - Fetching
 
-    func refresh(userInitiated: Bool = false) async {
-        guard !isRefreshing else { return }
+    /// `readOnly` skips anything that changes server state or posts banners (used by --print).
+    func refresh(userInitiated: Bool = false, readOnly: Bool = false) async {
+        guard !isRefreshing else {
+            if userInitiated { refreshQueued = true }
+            return
+        }
         isRefreshing = true
+        let started = generation
         defer {
             isRefreshing = false
             now = Date()
+            if refreshQueued {
+                refreshQueued = false
+                Task { await refresh(userInitiated: true, readOnly: readOnly) }
+            }
         }
         do {
             let fetched = try await withAPI { try await $0.notifications() }
+            guard started == generation else { return }
             // Keep optimistic reads hidden until the server catches up.
             threads = fetched.filter { thread in
                 guard thread.unread, let readAt = pendingReads[thread.id] else { return true }
@@ -161,13 +181,20 @@ final class NotificationStore: ObservableObject {
             error = nil
             await loadUserIfNeeded()
             await applyFilters(fetchDetails: true)
-            await autoReadFiltered()
-            announceNew()
+            guard started == generation else { return }
+            if !readOnly {
+                await autoReadFiltered()
+                announceNew()
+            }
             hasLoadedOnce = true
+        } catch is CancellationError {
+            return
         } catch let failure as ForgejoError {
+            guard started == generation else { return }
             Debug.log("refresh failed: \(failure)")
             error = failure
         } catch {
+            guard started == generation else { return }
             self.error = .network(error.localizedDescription)
         }
     }
@@ -224,6 +251,7 @@ final class NotificationStore: ObservableObject {
 
     private func enrich(_ needed: [NotificationThread], filters: FilterSettings) async {
         guard let credential = try? await credentials.current() else { return }
+        let started = generation
         isEnriching = true
         defer { isEnriching = false }
         let api = ForgejoAPI(credential: credential)
@@ -248,6 +276,7 @@ final class NotificationStore: ObservableObject {
                 addNext()
             }
         }
+        guard started == generation else { return }
         for (id, value) in results { enrichments[id] = value }
         let live = Set(threads.map(\.id))
         enrichments = enrichments.filter { live.contains($0.key) }
@@ -285,8 +314,9 @@ final class NotificationStore: ObservableObject {
 
     func markRead(_ targets: [NotificationThread]) async {
         let ids = Set(targets.map(\.id))
-        let readAt = Date()
-        for id in ids { pendingReads[id] = readAt }
+        guard !ids.isEmpty else { return }
+        let started = generation
+        for thread in targets { pendingReads[thread.id] = thread.updatedAt }
         threads.removeAll { ids.contains($0.id) && !$0.pinned }
         for index in threads.indices where ids.contains(threads[index].id) { threads[index].unread = false }
         await applyFilters(fetchDetails: false)
@@ -297,28 +327,42 @@ final class NotificationStore: ObservableObject {
                     try await group.waitForAll()
                 }
             }
-        } catch let failure as ForgejoError {
-            error = failure
+        } catch {
+            guard started == generation else { return }
+            self.error = error as? ForgejoError ?? .network(error.localizedDescription)
+            // Put them back so it doesn't look handled when it isn't.
             for id in ids { pendingReads[id] = nil }
-        } catch {}
+            let present = Set(threads.map(\.id))
+            threads.append(contentsOf: targets.filter { !present.contains($0.id) })
+            for index in threads.indices where ids.contains(threads[index].id) {
+                if let original = targets.first(where: { $0.id == threads[index].id }) { threads[index] = original }
+            }
+            await applyFilters(fetchDetails: false)
+        }
     }
 
     func readAll() async {
         switch Prefs.readAllScope {
         case .everything:
-            let cutoff = Date()
+            // Only clear what we've actually shown: anything newer than the latest thread we
+            // fetched (in server time) stays unread.
+            guard let newest = threads.map(\.updatedAt).max() else { return }
+            let cutoff = newest.addingTimeInterval(1)
+            let started = generation
             let previous = threads
-            for thread in threads where thread.unread { pendingReads[thread.id] = cutoff }
+            let ids = threads.filter(\.unread).map(\.id)
+            for thread in threads where thread.unread { pendingReads[thread.id] = thread.updatedAt }
             threads = threads.filter(\.pinned).map { var t = $0; t.unread = false; return t }
             await applyFilters(fetchDetails: false)
             do {
                 try await withAPI { try await $0.markAllRead(before: cutoff) }
-            } catch let failure as ForgejoError {
-                error = failure
-                pendingReads = [:]
+            } catch {
+                guard started == generation else { return }
+                self.error = error as? ForgejoError ?? .network(error.localizedDescription)
+                for id in ids { pendingReads[id] = nil }
                 threads = previous
                 await applyFilters(fetchDetails: false)
-            } catch {}
+            }
         case .shown:
             await markRead(shown.filter(\.thread.unread).map(\.thread))
         }

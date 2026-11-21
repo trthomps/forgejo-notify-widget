@@ -67,14 +67,14 @@ struct ForgejoAPI {
             result.draft = issue.pullRequest?.draft ?? false
             if includeReviewers, thread.subject.type == .pull,
                let pullURL = URL(string: url.absoluteString.replacingOccurrences(of: "/issues/", with: "/pulls/")) {
-                let pull: PullDTO? = try? await get(absolute: pullURL)
-                result.requestedReviewers = (pull?.requestedReviewers ?? []).map(\.login)
+                let pull: PullDTO = try await get(absolute: pullURL)
+                result.requestedReviewers = (pull.requestedReviewers ?? []).map(\.login)
             }
         }
         if includeComment, let url = thread.subject.latestCommentURL.flatMap(URL.init(string:)) {
-            let comment: CommentDTO? = try? await get(absolute: url)
-            result.latestCommentAuthor = comment?.user?.login
-            result.latestCommentBody = comment?.body
+            let comment: CommentDTO = try await get(absolute: url)
+            result.latestCommentAuthor = comment.user?.login
+            result.latestCommentBody = comment.body
         }
         return result
     }

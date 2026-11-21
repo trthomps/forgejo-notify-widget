@@ -290,6 +290,8 @@ final class LoopbackServer: @unchecked Sendable {
     private let listener: NWListener
     private let queue = DispatchQueue(label: "forgejo-notify.oauth")
     private var continuation: CheckedContinuation<[String: String], Error>?
+    /// A callback that arrived before anyone was waiting for it.
+    private var earlyResult: [String: String]?
     private(set) var port: UInt16 = 0
 
     private init(listener: NWListener) { self.listener = listener }
@@ -327,6 +329,10 @@ final class LoopbackServer: @unchecked Sendable {
     func waitForCallback(timeout: TimeInterval) async throws -> [String: String] {
         try await withCheckedThrowingContinuation { continuation in
             queue.async {
+                if let early = self.earlyResult {
+                    continuation.resume(returning: early)
+                    return
+                }
                 self.continuation = continuation
                 self.queue.asyncAfter(deadline: .now() + timeout) {
                     self.finish(.failure(ForgejoError.auth("Timed out waiting for the browser sign-in.")))
@@ -341,7 +347,10 @@ final class LoopbackServer: @unchecked Sendable {
     }
 
     private func finish(_ result: Result<[String: String], Error>) {
-        guard let continuation else { return }
+        guard let continuation else {
+            if case .success(let params) = result { earlyResult = params }
+            return
+        }
         self.continuation = nil
         continuation.resume(with: result)
     }
@@ -382,6 +391,8 @@ extension Data {
 actor CredentialProvider {
     private var cached: Credential?
     private var refreshTask: Task<Credential, Error>?
+    /// Bumped by reset(); loads that started before it are discarded.
+    private var epoch = 0
 
     static func normalizedServer(_ text: String) -> URL? {
         var trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -396,6 +407,7 @@ actor CredentialProvider {
     static func oauthAccount(_ server: URL) -> String { "oauth:\(server.absoluteString)" }
 
     func reset() {
+        epoch += 1
         cached = nil
         refreshTask?.cancel()
         refreshTask = nil
@@ -403,7 +415,9 @@ actor CredentialProvider {
 
     func current() async throws -> Credential {
         if let cached { return cached }
+        let started = epoch
         let credential = try await load(forceRenew: false)
+        guard started == epoch else { throw CancellationError() }
         cached = credential
         return credential
     }
@@ -413,10 +427,12 @@ actor CredentialProvider {
     func renew(after failed: Credential) async throws -> Credential? {
         if let cached, cached != failed { return cached }
         if let refreshTask { return try await refreshTask.value }
+        let started = epoch
         let task = Task { try await self.load(forceRenew: true) }
         refreshTask = task
-        defer { refreshTask = nil }
+        defer { if started == epoch { refreshTask = nil } }
         let renewed = try await task.value
+        guard started == epoch else { throw CancellationError() }
         cached = renewed
         return renewed.token == failed.token ? nil : renewed
     }
