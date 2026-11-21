@@ -20,6 +20,22 @@ KCM.SimpleKCM {
     property bool statusOK: false
     property bool checking: false
     readonly property string server: F.normalizeServer(cfg_serverURL) || ""
+    property var checkXHR: null
+    property int checkSeq: 0
+
+    Timer {
+        // Covers both a hung token lookup and a server that never answers.
+        id: checkTimeout
+        interval: 30000
+        onTriggered: {
+            if (page.checkXHR) page.checkXHR.abort()
+            page.checkXHR = null
+            page.checkSeq += 1
+            page.status = i18n("Timed out. Check the server address and your network.")
+            page.statusOK = false
+            page.checking = false
+        }
+    }
 
     Shell {
         id: shell
@@ -39,7 +55,15 @@ KCM.SimpleKCM {
     function check() {
         checking = true
         status = ""
-        const fail = message => { status = message; statusOK = false; checking = false }
+        const seq = ++checkSeq
+        checkTimeout.restart()
+        const fail = message => {
+            if (seq !== checkSeq) return
+            checkTimeout.stop()
+            status = message
+            statusOK = false
+            checking = false
+        }
         let tokenPromise
         let base
         let oauth = false
@@ -55,19 +79,24 @@ KCM.SimpleKCM {
             tokenPromise = login.token ? Promise.resolve(login.token) : shell.teaHelperToken(login)
         }
         tokenPromise.then(token => {
+            if (seq !== checkSeq) return
             if (!token) {
                 fail(cfg_authMode === "token" ? i18n("No token stored for %1 yet. Run the command above.", base)
                                               : i18n("tea didn't return a token. Is tea installed, and does “tea login list” show this login?"))
                 return
             }
             const xhr = new XMLHttpRequest()
+            checkXHR = xhr
             xhr.onreadystatechange = () => {
-                if (xhr.readyState !== XMLHttpRequest.DONE) return
-                checking = false
+                if (xhr.readyState !== XMLHttpRequest.DONE || seq !== checkSeq) return
+                checkXHR = null
                 if (xhr.status === 200) {
                     try {
-                        status = i18n("Signed in to %1 as %2.", base, JSON.parse(xhr.responseText).login)
+                        const login = JSON.parse(xhr.responseText).login
+                        checkTimeout.stop()
+                        status = i18n("Signed in to %1 as %2.", base, login)
                         statusOK = true
+                        checking = false
                     } catch (e) { fail(i18n("Unexpected response from %1.", base)) }
                 } else {
                     const info = F.errorInfo(F.errorForStatus(xhr.status, xhr.responseText))

@@ -26,7 +26,9 @@ P5Support.DataSource {
     function run(command) {
         return new Promise(resolve => {
             // A unique trailing comment lets the same command run again while an old one lingers.
-            const source = command + " # " + (++serial)
+            // Nothing may hang the widget (e.g. secret-tool waiting on a keyring unlock prompt):
+            // give every command 25 seconds. timeout signals the whole process group.
+            const source = "timeout 25 sh -c " + F.shellQuote(command) + " # " + (++serial)
             callbacks[source] = (code, stdout, stderr) => resolve({ code, stdout, stderr })
             connectSource(source)
         })

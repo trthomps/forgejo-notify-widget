@@ -17,7 +17,9 @@ PlasmoidItem {
     property var hidden: []
     property var error: null             // F.errorInfo(...)
     property bool refreshing: false
-    property bool enriching: false
+    property int enrichCount: 0
+    readonly property bool enriching: enrichCount > 0
+    property int filterSeq: 0
     property real lastFetched: 0
     property var user: null              // { login }
     property string userFor: ""
@@ -190,7 +192,8 @@ PlasmoidItem {
     property var inflight: []
 
     function request(cred, method, pathOrURL, query) {
-        let url = pathOrURL.indexOf("://") > 0 ? pathOrURL : cred.baseURL + "/api/v1/" + pathOrURL
+        let url = F.apiURL(cred.baseURL, pathOrURL)
+        if (url === null) return Promise.reject(F.apiError("decoding", i18n("Unexpected URL from the server: %1", pathOrURL)))
         if (query) {
             const parts = []
             Object.keys(query).sort().forEach(k => [].concat(query[k]).forEach(v =>
@@ -200,7 +203,7 @@ PlasmoidItem {
         return new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest()
             const entry = { xhr: xhr, started: Date.now(), done: false, reject: reject }
-            inflight.push(entry)
+            inflight = inflight.concat([entry])
             xhr.onreadystatechange = () => {
                 if (xhr.readyState !== XMLHttpRequest.DONE || entry.done) return
                 entry.done = true
@@ -253,9 +256,9 @@ PlasmoidItem {
         const page = n => request(cred, "GET", "notifications",
                                   { "status-types": ["unread", "pinned"], limit: "50", page: String(n) })
             .then(text => {
-                const batch = F.parseThreads(text)
-                batch.forEach(t => all.push(t))
-                if (batch.length >= 50 && n < 10) return page(n + 1)
+                const batch = F.parsePage(text)
+                batch.threads.forEach(t => all.push(t))
+                if (batch.rawCount >= 50 && n < 10) return page(n + 1)
                 const seen = {}
                 return all.filter(t => seen[t.id] ? false : (seen[t.id] = true))
             })
@@ -264,8 +267,10 @@ PlasmoidItem {
 
     function fetchEnrichment(cred, t, includeComment, includeReviewers) {
         const result = { author: null, assignees: [], requestedReviewers: [], labels: [], draft: false,
-                         latestCommentAuthor: null, latestCommentBody: null }
+                         latestCommentAuthor: null, latestCommentBody: null, commentFailed: false }
         let chain = Promise.resolve()
+        // Without the issue the filters can't judge it; fail so it's shown rather than treated as "not involved".
+        if (F.isIssueLike(t) && !t.url) return Promise.reject(F.apiError("decoding", "no subject URL"))
         if (t.url && F.isIssueLike(t)) {
             chain = chain.then(() => request(cred, "GET", t.url)).then(text => {
                 Object.assign(result, F.parseIssue(text))
@@ -275,10 +280,14 @@ PlasmoidItem {
             })
         }
         if (includeComment && t.latestCommentURL) {
-            chain = chain.then(() => getJSON(cred, t.latestCommentURL)).then(c => {
+            // A deleted comment shouldn't throw away the issue data the other filters can use.
+            chain = chain.then(() => getJSON(cred, t.latestCommentURL).then(c => {
                 result.latestCommentAuthor = c.user && c.user.login || null
                 result.latestCommentBody = typeof c.body === "string" ? c.body : null
-            })
+            }, err => {
+                if (err.kind === "unauthorized") throw err
+                result.commentFailed = true
+            }))
         }
         return chain.then(() => result)
     }
@@ -293,8 +302,10 @@ PlasmoidItem {
         refreshing = true
         const started = generation
         const finish = () => {
-            refreshing = false
             now = Date.now()
+            // accountChanged() already reset this and may have started a newer refresh.
+            if (started !== generation) return
+            refreshing = false
             if (refreshQueued) {
                 refreshQueued = false
                 Qt.callLater(() => refresh(true))
@@ -315,10 +326,12 @@ PlasmoidItem {
             rememberBusyRepos()
             return loadUserIfNeeded()
                 .then(() => applyFilters(true))
-                .then(() => {
+                .then(applied => {
                     if (started !== generation) return
-                    autoReadFiltered()
-                    announceNew()
+                    if (applied) {
+                        autoReadFiltered()
+                        announceNew()
+                    }
                     hasLoadedOnce = true
                 })
         }).catch(err => {
@@ -336,14 +349,19 @@ PlasmoidItem {
         }).catch(() => {})
     }
 
+    /// Resolves to true if this call set the list, false if a newer call superseded it (so the
+    /// caller mustn't act on `hidden`, e.g. auto-read, based on filters that changed meanwhile).
     function applyFilters(fetchDetails) {
-        const f = filters
-        const needed = fetchDetails ? F.staleEnrichments(threads, f, enrichments) : []
-        const work = needed.length ? enrich(needed, f) : Promise.resolve()
+        const seq = ++filterSeq
+        const needed = fetchDetails ? F.staleEnrichments(threads, filters, enrichments) : []
+        const work = needed.length ? enrich(needed, filters) : Promise.resolve()
         return work.then(() => {
-            const p = F.partition(threads, f, enrichments, user ? user.login : null)
+            if (seq !== filterSeq) return false
+            // The current filters, not the ones when the lookups started.
+            const p = F.partition(threads, filters, enrichments, user ? user.login : null)
             shown = p.shown
             hidden = p.hidden
+            return true
         })
     }
 
@@ -351,7 +369,7 @@ PlasmoidItem {
         const started = generation
         const includeComment = F.needsComment(f)
         const includeReviewers = f.onlyInvolved
-        enriching = true
+        enrichCount += 1
         return currentCredential().then(cred => {
             const results = {}
             const queue = needed.slice()
@@ -361,8 +379,10 @@ PlasmoidItem {
                 if (!t) return Promise.resolve()
                 return fetchEnrichment(cred, t, includeComment, includeReviewers)
                     .then(value => { results[t.id] = { updatedAt: t.updatedAt, hasComment: includeComment,
-                                                       hasReviewers: includeReviewers, value: value } })
-                    .catch(() => {})
+                                                       hasReviewers: includeReviewers, value: value } },
+                          // Remember the failure so it isn't refetched every poll (see F.FAILURE_RETRY).
+                          () => { results[t.id] = { updatedAt: t.updatedAt, hasComment: includeComment,
+                                                    hasReviewers: includeReviewers, value: null, failedAt: Date.now() } })
                     .then(worker)
             }
             const workers = []
@@ -377,7 +397,7 @@ PlasmoidItem {
                 enrichments = next
                 saveCache()
             })
-        }).catch(() => {}).then(() => { enriching = false })
+        }).catch(() => {}).then(() => { enrichCount -= 1 })
     }
 
     function autoReadFiltered() {
@@ -457,9 +477,22 @@ PlasmoidItem {
         threads = threads.filter(t => !ids[t.id] || t.pinned)
             .map(t => ids[t.id] ? Object.assign({}, t, { unread: false }) : t)
         applyFilters(false)
+        // Settle each PATCH separately so one failure doesn't undo the ones the server accepted.
+        // A 401 is rethrown so withAPI renews the token and retries (marking read twice is harmless).
         withAPI(cred => Promise.all(targets.map(t =>
-            request(cred, "PATCH", "notifications/threads/" + t.id, { "to-status": "read" }))))
-            .catch(err => {
+            request(cred, "PATCH", "notifications/threads/" + t.id, { "to-status": "read" })
+                .then(() => null, err => ({ thread: t, err: err }))))
+            .then(results => {
+                const failed = results.filter(r => r !== null)
+                const auth = failed.find(r => r.err.kind === "unauthorized")
+                if (auth) throw auth.err
+                return failed
+            }))
+            .then(failed => {
+                if (started !== generation || !failed.length) return
+                error = F.errorInfo(failed[0].err)
+                restore(failed.map(r => r.thread))
+            }, err => {
                 if (started !== generation || err.kind === "cancelled") return
                 error = F.errorInfo(err)
                 restore(targets)

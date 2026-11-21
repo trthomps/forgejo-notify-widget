@@ -175,4 +175,36 @@ test("formatting", () => {
     assert.strictEqual(F.tintFor({ type: "Pull", state: "closed" }), "negative");
 });
 
+test("paging counts raw entries", () => {
+    const page = F.parsePage(JSON.stringify([raw(), raw({ id: 2, updated_at: null })]));
+    assert.strictEqual(page.threads.length, 1);
+    assert.strictEqual(page.rawCount, 2);
+});
+
+test("api URLs stay on the configured origin", () => {
+    const base = "https://git.example";
+    assert.strictEqual(F.apiURL(base, "notifications"), "https://git.example/api/v1/notifications");
+    assert.strictEqual(F.apiURL(base, "https://git.example/api/v1/repos/a/b/issues/1"),
+        "https://git.example/api/v1/repos/a/b/issues/1");
+    // Misconfigured ROOT_URL: rebased onto the configured server.
+    assert.strictEqual(F.apiURL(base, "http://internal:3000/api/v1/repos/a/b/issues/1"),
+        "https://git.example/api/v1/repos/a/b/issues/1");
+    assert.strictEqual(F.apiURL(base, "https://evil.example/steal"), null);
+    // Prefix trick: same string start, different host.
+    assert.strictEqual(F.apiURL(base, "https://git.example.evil/x"), null);
+});
+
+test("failed lookups", () => {
+    const t = F.parseThread(raw());
+    const f = config({ filterOnlyInvolved: true });
+    const failed = { 1: { updatedAt: t.updatedAt, hasComment: true, hasReviewers: true, value: null, failedAt: now } };
+    assert.strictEqual(F.staleEnrichments([t], f, failed, now + 60e3).length, 0);
+    assert.strictEqual(F.staleEnrichments([t], f, failed, now + 31 * 60e3).length, 1);
+    // Unknown → shown, not "Not involved".
+    eq(F.partition([t], f, failed, "me").shown.length, 1);
+    const e = { author: "x", assignees: [], requestedReviewers: [], labels: [], commentFailed: true };
+    assert.strictEqual(F.hiddenReason(f, t, e, "me"), null);
+    assert.strictEqual(F.hiddenReason(f, t, Object.assign({}, e, { commentFailed: false }), "me"), "Not involved");
+});
+
 console.log(`${pass} tests passed`);

@@ -48,12 +48,25 @@ function parseThread(raw) {
     };
 }
 
+/// One page of notifications: { threads, rawCount }. rawCount counts entries before unparseable
+/// ones are dropped, so paging can tell a full page from the last one.
 /// Throws an error with .kind = "decoding" when the page isn't a list.
-function parseThreads(text) {
+function parsePage(text) {
     var list;
     try { list = JSON.parse(text); } catch (e) { throw apiError("decoding", "Couldn't read the notification list."); }
     if (!Array.isArray(list)) throw apiError("decoding", "Expected a list of notifications.");
-    return list.map(parseThread).filter(function (t) { return t !== null; });
+    return { threads: list.map(parseThread).filter(function (t) { return t !== null; }), rawCount: list.length };
+}
+
+function parseThreads(text) { return parsePage(text).threads; }
+
+/// The URL to request for an API path or a server-supplied absolute URL, kept on `base`'s origin so
+/// the token never goes to another host or scheme (e.g. a misconfigured ROOT_URL). null if it can't be.
+function apiURL(base, pathOrURL) {
+    if (pathOrURL.indexOf("://") < 0) return base + "/api/v1/" + pathOrURL.replace(/^\/+/, "");
+    if (pathOrURL.indexOf(base + "/") === 0) return pathOrURL;
+    var i = pathOrURL.indexOf("/api/v1/");
+    return i < 0 ? null : base + pathOrURL.slice(i);
 }
 
 /// Where clicking goes: the latest comment, else the issue/PR/commit, else the repository.
@@ -182,6 +195,8 @@ function hiddenReason(f, t, e, me) {
             || (e.assignees || []).some(function (a) { return lower(a) === me; })
             || (e.requestedReviewers || []).some(function (a) { return lower(a) === me; })
             || mentions(e.latestCommentBody, me);
+        // The comment lookup failed, so a mention can't be ruled out.
+        if (!involved && e.commentFailed) return null;
         if (!involved) return "Not involved";
     }
     return null;
@@ -203,12 +218,18 @@ function partition(threads, f, enrichments, me) {
     return { shown: shown, hidden: hidden };
 }
 
+/// How long a failed lookup is remembered before it's tried again (unless the thread changes).
+var FAILURE_RETRY = 30 * 60 * 1000;
+
 /// Threads whose enrichment is missing or out of date for the current filters.
-function staleEnrichments(threads, f, enrichments) {
+/// A cached failure ({ value: null, failedAt }) counts as fresh for FAILURE_RETRY.
+function staleEnrichments(threads, f, enrichments, now) {
+    now = now || Date.now();
     return threads.filter(function (t) {
         if (!needsEnrichment(f, t)) return false;
         var c = enrichments[t.id];
         if (!c) return true;
+        if (c.value === null) return c.updatedAt < t.updatedAt || !(now - c.failedAt < FAILURE_RETRY);
         return c.updatedAt < t.updatedAt
             || (needsComment(f) && !c.hasComment)
             || (f.onlyInvolved && !c.hasReviewers);
