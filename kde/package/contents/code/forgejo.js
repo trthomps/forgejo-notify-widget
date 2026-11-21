@@ -385,7 +385,7 @@ function isoSeconds(ms) { return new Date(Math.floor(ms / 1000) * 1000).toISOStr
 function iconFor(t) {
     switch (t.type) {
     case "Pull": return t.state === "merged" ? "vcs-merge" : "vcs-merge-request";
-    case "Issue": return t.state === "closed" ? "emblem-checked" : "data-information";
+    case "Issue": return t.state === "closed" ? "task-complete" : "media-record";
     case "Commit": return "vcs-commit";
     case "Repository": return "tag";
     default: return "notifications";

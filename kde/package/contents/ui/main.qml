@@ -71,13 +71,16 @@ PlasmoidItem {
     readonly property color forgejoRed: "#d40000"
 
     onFiltersChanged: if (hasLoadedOnce) applyFilters(true)
-    onAccountKeyChanged: accountChangeTimer.restart()
+    /// The account the current state belongs to. accountKeyChanged also fires while the config
+    /// loads at startup, so compare values rather than resetting on every signal.
+    property string appliedAccountKey: ""
+    onAccountKeyChanged: if (accountKey !== appliedAccountKey) accountChangeTimer.restart()
 
     Timer {
         // Typing a server URL changes the config on every keystroke; wait for it to settle.
         id: accountChangeTimer
         interval: 800
-        onTriggered: root.accountChanged()
+        onTriggered: if (root.accountKey !== root.appliedAccountKey) root.accountChanged()
     }
 
     // MARK: - Representations
@@ -533,6 +536,7 @@ PlasmoidItem {
 
     /// Account settings changed: drop the cached credential and start over.
     function accountChanged() {
+        appliedAccountKey = accountKey
         generation += 1
         credential = null
         threads = []
@@ -605,6 +609,7 @@ PlasmoidItem {
     }
 
     Component.onCompleted: {
+        appliedAccountKey = accountKey
         loadCache()
         refresh(false)
     }
