@@ -5,6 +5,8 @@ A macOS menu bar app for your Forgejo notifications: the Forgejo logo with an un
 ![Menu bar styles, light](docs/menubar-light.png)
 ![Menu bar styles, dark](docs/menubar-dark.png)
 
+**On Linux?** There's a KDE Plasma 6 widget version in [`kde/`](kde/README.md): `make kde-install`.
+
 ## Install
 
 Requires macOS 14+ and the Xcode Command Line Tools (`xcode-select --install`).

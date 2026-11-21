@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kcfg xmlns="http://www.kde.org/standards/kcfg/1.0"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.kde.org/standards/kcfg/1.0 http://www.kde.org/standards/kcfg/1.0/kcfg.xsd">
+  <kcfgfile name=""/>
+  <group name="General">
+    <!-- color | monochrome -->
+    <entry name="iconColor" type="String"><default>color</default></entry>
+    <!-- badge | number | dot | none -->
+    <entry name="badgeStyle" type="String"><default>badge</default></entry>
+    <entry name="dimWhenEmpty" type="Bool"><default>true</default></entry>
+    <!-- Seconds between fetches (minimum 30) -->
+    <entry name="refreshInterval" type="Int"><default>60</default></entry>
+    <entry name="markReadOnOpen" type="Bool"><default>true</default></entry>
+    <entry name="systemNotifications" type="Bool"><default>false</default></entry>
+    <!-- everything | shown -->
+    <entry name="readAllScope" type="String"><default>everything</default></entry>
+    <entry name="showHidden" type="Bool"><default>false</default></entry>
+  </group>
+  <group name="Account">
+    <!-- tea | token -->
+    <entry name="authMode" type="String"><default>tea</default></entry>
+    <!-- Empty: tea's default login -->
+    <entry name="teaLogin" type="String"><default></default></entry>
+    <!-- Empty: look in PATH and the usual install locations -->
+    <entry name="teaPath" type="String"><default></default></entry>
+    <!-- Server for access-token mode; the token itself is in the Secret Service -->
+    <entry name="serverURL" type="String"><default></default></entry>
+  </group>
+  <group name="Filters">
+    <!-- Comma-separated: Issue,Pull,Commit,Repository,Other -->
+    <entry name="filterTypes" type="String"><default>Issue,Pull,Commit,Repository,Other</default></entry>
+    <entry name="filterHideClosed" type="Bool"><default>false</default></entry>
+    <entry name="filterHideMerged" type="Bool"><default>false</default></entry>
+    <entry name="filterHideDrafts" type="Bool"><default>false</default></entry>
+    <entry name="filterOnlyInvolved" type="Bool"><default>false</default></entry>
+    <!-- Comma- or newline-separated, case-insensitive, * globs -->
+    <entry name="filterIncludeRepos" type="String"><default></default></entry>
+    <entry name="filterExcludeRepos" type="String"><default></default></entry>
+    <entry name="filterExcludeAuthors" type="String"><default></default></entry>
+    <entry name="filterExcludeCommenters" type="String"><default></default></entry>
+    <entry name="filterExcludeLabels" type="String"><default></default></entry>
+    <entry name="filterExcludeTitles" type="String"><default></default></entry>
+    <entry name="filterAutoRead" type="Bool"><default>false</default></entry>
+  </group>
+  <group name="Cache">
+    <!-- Per-thread issue/comment lookups for the filters: {"server": ..., "items": {id: ...}}. Never the token. -->
+    <entry name="enrichmentCache" type="String"><default></default></entry>
+    <!-- Most-notified repos, for the Filters page's one-click hide buttons -->
+    <entry name="busyRepos" type="String"><default></default></entry>
+  </group>
+</kcfg>

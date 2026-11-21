@@ -1,0 +1,18 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "Travis Thompson"
+            }
+        ],
+        "Category": "Online Services",
+        "Description": "Your Forgejo notifications, with an unread badge, Read all, and filters",
+        "Icon": "notifications",
+        "Id": "dev.forgejonotify.plasmoid",
+        "License": "MIT",
+        "Name": "Forgejo Notifications",
+        "Version": "1.0"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}
