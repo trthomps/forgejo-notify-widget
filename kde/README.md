@@ -6,6 +6,10 @@ A Plasma 6 widget (plasmoid) port of the macOS app: the Forgejo logo with an unr
 - **In the list**: click a notification to open it (the latest comment if there is one). Hover and click ✓ to mark one read. Right-click a row to copy its link or hide its repository.
 - **On the desktop**: the list itself.
 
+| Panel icon styles | Popup |
+| --- | --- |
+| ![Panel icon styles](../docs/kde-panel.png) | ![Popup](../docs/kde-popup.png) |
+
 ## Install
 
 Requires Plasma 6. For the default sign-in, [tea](https://gitea.com/gitea/tea) with a login (`tea login add`).
@@ -15,6 +19,8 @@ make kde-install    # or: kpackagetool6 -t Plasma/Applet -i kde/package
 ```
 
 Then right-click a panel or the desktop → **Add Widgets…** → **Forgejo Notifications**. Settings are in the widget's **Configure…** dialog. **Account → Check Sign-in** tests your login.
+
+To remove it: `make kde-uninstall` (or `kpackagetool6 -t Plasma/Applet -r dev.forgejonotify.plasmoid`).
 
 After upgrading an installed copy, restart Plasma so it reloads the QML: `systemctl --user restart plasma-plasmashell`. To try it in a window without touching your panel: `plasmawindowed dev.forgejonotify.plasmoid`.
 
