@@ -109,3 +109,7 @@ FORGEJO_NOTIFY_DEBUG=1 "build/Forgejo Notifications.app/Contents/MacOS/ForgejoNo
 | `StatusItemController.swift`, `PopoverView.swift`, `SettingsView.swift` | UI |
 
 The KDE widget lives in `kde/package` (a standard Plasma applet package). Its parsing and filter logic in `kde/package/contents/code/forgejo.js` mirrors `Models.swift`, `Filters.swift` and the tea config reader in `Auth.swift`, so a change to one usually needs the same change in the other. `make kde-test` runs its tests under Node. [`kde/README.md`](kde/README.md) has the file map.
+
+## License
+
+[MIT](LICENSE). The Forgejo logo belongs to the Forgejo project and is not covered by this license.
