@@ -258,7 +258,8 @@ enum AppIcon {
         }
     }
 
-    /// The Forgejo mark on a light squircle with a small red notification badge.
+    /// The Forgejo mark on a light squircle. No badge: macOS adds its own, and a baked-in
+    /// dot reads as a second unread count next to notification banners.
     static func draw(_ ctx: CGContext, side: CGFloat) {
         let inset = side * 100 / 1024
         let rect = CGRect(x: inset, y: inset, width: side - inset * 2, height: side - inset * 2)
@@ -281,16 +282,10 @@ enum AppIcon {
             CGColor(srgbRed: 0.93, green: 0.93, blue: 0.94, alpha: 1),
         ] as CFArray, locations: [0, 1])!
         ctx.drawLinearGradient(gradient, start: CGPoint(x: 0, y: rect.maxY), end: CGPoint(x: 0, y: rect.minY), options: [])
-        let logo = rect.insetBy(dx: rect.width * 0.16, dy: rect.height * 0.16)
+        let logo = rect.insetBy(dx: rect.width * 0.09, dy: rect.height * 0.09)
         ForgejoLogo.draw(in: ctx, rect: logo, orange: NSColor.forgejoOrange.cgColor, red: NSColor.forgejoRed.cgColor)
         ctx.restoreGState()
 
-        let badge = rect.width * 0.24
-        let badgeRect = CGRect(x: rect.maxX - badge * 0.95, y: rect.maxY - badge * 0.95, width: badge, height: badge)
-        ctx.setFillColor(CGColor(gray: 1, alpha: 1))
-        ctx.fillEllipse(in: badgeRect.insetBy(dx: -side * 0.012, dy: -side * 0.012))
-        ctx.setFillColor(NSColor.systemRed.cgColor)
-        ctx.fillEllipse(in: badgeRect)
     }
 
     static func bitmap(side: CGFloat, draw: (CGContext, CGFloat) -> Void) -> NSBitmapImageRep {
